@@ -31,20 +31,20 @@ jobs:
         run: |
           mkdir -p target/universal-apple-darwin/release
           lipo -create \
-            target/x86_64-apple-darwin/release/adb-qr-pair \
-            target/aarch64-apple-darwin/release/adb-qr-pair \
-            -output target/universal-apple-darwin/release/adb-qr-pair
+            target/x86_64-apple-darwin/release/pairqr \
+            target/aarch64-apple-darwin/release/pairqr \
+            -output target/universal-apple-darwin/release/pairqr
 
       - name: Package macOS Universal
         run: |
           cd target/universal-apple-darwin/release
-          tar -czvf ../../../adb-qr-pair-macos-universal.tar.gz adb-qr-pair
+          tar -czvf ../../../pairqr-macos-universal.tar.gz pairqr
 
       - name: Upload macOS Universal artifact
         uses: actions/upload-artifact@v4
         with:
-          name: adb-qr-pair-macos-universal
-          path: adb-qr-pair-macos-universal.tar.gz
+          name: pairqr-macos-universal
+          path: pairqr-macos-universal.tar.gz
 
   build-windows:
     name: Build Windows ${{ matrix.arch }}
@@ -70,13 +70,13 @@ jobs:
       - name: Package Windows
         shell: pwsh
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/adb-qr-pair.exe -DestinationPath adb-qr-pair-windows-${{ matrix.arch }}.zip
+          Compress-Archive -Path target/${{ matrix.target }}/release/pairqr.exe -DestinationPath pairqr-windows-${{ matrix.arch }}.zip
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: adb-qr-pair-windows-${{ matrix.arch }}
-          path: adb-qr-pair-windows-${{ matrix.arch }}.zip
+          name: pairqr-windows-${{ matrix.arch }}
+          path: pairqr-windows-${{ matrix.arch }}.zip
 
   release:
     name: Create Release
@@ -95,7 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/adb-qr-pair-macos-universal/adb-qr-pair-macos-universal.tar.gz
-            artifacts/adb-qr-pair-windows-x64/adb-qr-pair-windows-x64.zip
-            artifacts/adb-qr-pair-windows-x86/adb-qr-pair-windows-x86.zip
+            artifacts/pairqr-macos-universal/pairqr-macos-universal.tar.gz
+            artifacts/pairqr-windows-x64/pairqr-windows-x64.zip
+            artifacts/pairqr-windows-x86/pairqr-windows-x86.zip
           generate_release_notes: true
