@@ -15,6 +15,9 @@ use std::time::Duration;
 /// mDNS service type for ADB pairing
 const PAIRING_SERVICE: &str = "_adb-tls-pairing._tcp.local.";
 
+/// mDNS service type for ADB connect
+const CONNECT_SERVICE: &str = "_adb-tls-connect._tcp.local.";
+
 /// Characters for random name generation
 const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -102,14 +105,19 @@ fn adb_pair(ip: &str, port: u16, password: &str) -> bool {
             let stdout = String::from_utf8_lossy(&result.stdout);
             let stderr = String::from_utf8_lossy(&result.stderr);
 
-            if result.status.success() || stdout.contains("Successfully paired") {
+            // Print actual output for debugging
+            if !stdout.trim().is_empty() {
+                println!("    adb: {}", stdout.trim());
+            }
+            if !stderr.trim().is_empty() {
+                println!("    adb err: {}", stderr.trim());
+            }
+
+            if stdout.contains("Successfully paired") {
                 println!("[+] Pairing successful!");
                 true
             } else {
-                println!(
-                    "[-] Pairing failed: {}",
-                    if stderr.is_empty() { &stdout } else { &stderr }
-                );
+                println!("[-] Pairing may have failed");
                 false
             }
         }
@@ -187,11 +195,19 @@ async fn main() {
         }
     };
 
-    // Browse for pairing services
+    // Browse for both pairing and connect services from the start
     let pairing_receiver = match mdns.browse(PAIRING_SERVICE) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to browse for pairing services: {}", e);
+            return;
+        }
+    };
+
+    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to browse for connect services: {}", e);
             return;
         }
     };
@@ -237,39 +253,54 @@ async fn main() {
         return;
     }
 
-    // Shutdown our mDNS - we'll use ADB's built-in mdns instead
-    let _ = mdns.shutdown();
-
     // Wait a moment for the device to settle after pairing dialog closes
     println!("\n[*] Looking for device connect service...");
     std::thread::sleep(Duration::from_millis(500));
 
-    // Try to find connect service using ADB's built-in mdns
+    // Try to find connect service - first check adb mdns, then our own browse
     let mut connected = false;
     let timeout = std::time::Instant::now();
 
     while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(15) {
+        // Try ADB's built-in mdns first
         if let Ok(output) = Command::new("adb").args(["mdns", "services"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
 
-            // Parse adb mdns services output for connect services
-            // Format: "adb-SERIAL-XXXXXX	_adb-tls-connect._tcp.	IP:PORT"
             for line in stdout.lines() {
                 if line.contains("_adb-tls-connect._tcp") {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() >= 3 {
-                        let addr = parts[2]; // IP:PORT
-                        println!("[+] Connect service found: {}", addr);
+                        let addr = parts[2];
+                        println!("[+] Connect service found (adb mdns): {}", addr);
 
-                        // Try to connect
-                        let connect_output = Command::new("adb")
-                            .args(["connect", addr])
-                            .output();
-
-                        if let Ok(result) = connect_output {
+                        if let Ok(result) = Command::new("adb").args(["connect", addr]).output() {
                             let out = String::from_utf8_lossy(&result.stdout);
+                            println!("    adb: {}", out.trim());
                             if out.contains("connected") || out.contains("already") {
-                                println!("[+] Connected successfully!");
+                                println!("[+] Connected!");
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check our own mDNS browse
+        if !connected {
+            while let Ok(event) = connect_receiver.recv_timeout(Duration::from_millis(0)) {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    if let Some(ip) = get_preferred_ip(info.get_addresses()) {
+                        let port = info.get_port();
+                        let addr = format!("{}:{}", ip, port);
+                        println!("[+] Connect service found (mdns-sd): {}", addr);
+
+                        if let Ok(result) = Command::new("adb").args(["connect", &addr]).output() {
+                            let out = String::from_utf8_lossy(&result.stdout);
+                            println!("    adb: {}", out.trim());
+                            if out.contains("connected") || out.contains("already") {
+                                println!("[+] Connected!");
                                 connected = true;
                                 break;
                             }
@@ -283,6 +314,9 @@ async fn main() {
             std::thread::sleep(Duration::from_millis(500));
         }
     }
+
+    // Cleanup
+    let _ = mdns.shutdown();
 
     if !connected {
         println!("[-] Could not auto-connect. You may need to connect manually.");
