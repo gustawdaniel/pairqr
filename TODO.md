@@ -48,7 +48,7 @@ This document tracks package managers where pairqr should be published. Once a p
   - [cargo-aur](https://crates.io/crates/cargo-aur) helper tool
 
 ### Debian/Ubuntu (Priority: Medium)
-- **Status:** Not started
+- **Status:** Done (builds .deb in GitHub Actions)
 - **Effort:** High
 - **Description:** .deb packages for Debian-based distributions
 - **Approach:** Use `cargo-deb` to generate .deb packages, host in a PPA or attach to GitHub Releases
@@ -124,7 +124,7 @@ This document tracks package managers where pairqr should be published. Once a p
 ## Cross-Platform
 
 ### cargo-binstall (Priority: Medium)
-- **Status:** Not started
+- **Status:** Done
 - **Effort:** Low
 - **Description:** Downloads pre-built binaries instead of compiling from source
 - **Approach:** Add metadata to Cargo.toml pointing to GitHub Releases

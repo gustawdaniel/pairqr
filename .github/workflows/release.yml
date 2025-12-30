@@ -88,6 +88,44 @@ jobs:
           name: pairqr-linux-${{ matrix.arch }}
           path: pairqr-linux-${{ matrix.arch }}.tar.gz
 
+  build-deb:
+    name: Build Debian ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb and cross
+        run: |
+          cargo install cargo-deb
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build with cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build deb package
+        run: cargo deb --no-build --target ${{ matrix.target }}
+
+      - name: Rename deb package
+        run: |
+          mv target/${{ matrix.target }}/debian/*.deb pairqr-${{ matrix.arch }}.deb
+
+      - name: Upload Debian artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairqr-deb-${{ matrix.arch }}
+          path: pairqr-${{ matrix.arch }}.deb
+
   build-windows:
     name: Build Windows ${{ matrix.arch }}
     runs-on: windows-latest
@@ -122,7 +160,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-macos-universal, build-linux, build-windows]
+    needs: [build-macos-universal, build-linux, build-deb, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -143,6 +181,8 @@ jobs:
             artifacts/pairqr-linux-aarch64/pairqr-linux-aarch64.tar.gz
             artifacts/pairqr-linux-armv7/pairqr-linux-armv7.tar.gz
             artifacts/pairqr-linux-arm/pairqr-linux-arm.tar.gz
+            artifacts/pairqr-deb-amd64/pairqr-amd64.deb
+            artifacts/pairqr-deb-arm64/pairqr-arm64.deb
             artifacts/pairqr-windows-x64/pairqr-windows-x64.zip
             artifacts/pairqr-windows-x86/pairqr-windows-x86.zip
           generate_release_notes: true

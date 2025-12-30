@@ -27,6 +27,20 @@ scoop install pairqr
 cargo install pairqr
 ```
 
+Or with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) for faster pre-built binary installation:
+
+```bash
+cargo binstall pairqr
+```
+
+### Debian/Ubuntu
+
+Download the `.deb` package from [Releases](https://github.com/richard-fairthorne/pairqr/releases):
+
+```bash
+sudo dpkg -i pairqr-amd64.deb
+```
+
 ### Pre-built Binaries
 
 Pre-built binaries for macOS, Linux, and Windows are available on the [Releases](https://github.com/richard-fairthorne/pairqr/releases) page.

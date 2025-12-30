@@ -1,6 +1,6 @@
 [package]
 name = "pairqr"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 description = "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
 license = "GPL-3.0"
@@ -42,6 +42,17 @@ pkg-url = "{ repo }/releases/download/v{ version }/pairqr-macos-universal.tar.gz
 
 [package.metadata.binstall.overrides.aarch64-apple-darwin]
 pkg-url = "{ repo }/releases/download/v{ version }/pairqr-macos-universal.tar.gz"
+
+[package.metadata.deb]
+maintainer = "Richard Fairthorne <richard@fairthorne.net>"
+copyright = "2024, Richard Fairthorne"
+extended-description = "A command-line tool to pair Android devices for wireless ADB debugging by scanning a QR code, just like Android Studio."
+depends = "adb"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/pairqr", "usr/bin/", "755"],
+]
 
 [profile.release]
 lto = true
