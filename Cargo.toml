@@ -1,0 +1,20 @@
+[package]
+name = "pairqr"
+version = "0.1.10"
+edition = "2021"
+description = "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
+license = "GPL-3.0"
+repository = "https://github.com/richard-fairthorne/pairqr"
+
+[dependencies]
+mdns-sd = "0.11"
+qrcode = "0.14"
+rand = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+ctrlc = "3.4"
+flume = "0.11"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
