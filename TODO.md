@@ -38,7 +38,7 @@ This document tracks package managers where pairqr should be published. Once a p
   - [Publishing on crates.io](https://doc.rust-lang.org/cargo/reference/publishing.html)
 
 ### AUR - Arch User Repository (Priority: Medium)
-- **Status:** Not started
+- **Status:** Ready (needs AUR account to push)
 - **Effort:** Medium
 - **Description:** Community-driven repository for Arch Linux and derivatives (Manjaro, EndeavourOS)
 - **Approach:** Create PKGBUILD that downloads from GitHub Releases or builds from source
@@ -102,7 +102,7 @@ This document tracks package managers where pairqr should be published. Once a p
   - [Scoop Wiki - Creating Manifests](https://github.com/ScoopInstaller/Scoop/wiki/Creating-an-app-manifest)
 
 ### winget (Priority: Medium)
-- **Status:** Not started
+- **Status:** PR submitted (https://github.com/microsoft/winget-pkgs/pull/326962)
 - **Effort:** Medium
 - **Description:** Official Windows Package Manager, ships with Windows 11
 - **Approach:** Submit manifest to microsoft/winget-pkgs repository
@@ -111,7 +111,7 @@ This document tracks package managers where pairqr should be published. Once a p
   - [Submit packages to Windows Package Manager](https://learn.microsoft.com/en-us/windows/package-manager/package/repository)
 
 ### Chocolatey (Priority: Medium)
-- **Status:** Not started
+- **Status:** Ready (needs Chocolatey account to push)
 - **Effort:** Medium
 - **Description:** Largest Windows package repository, popular in enterprise/DevOps
 - **Approach:** Create .nuspec package and submit to community repository
