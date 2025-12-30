@@ -52,16 +52,52 @@ jobs:
     strategy:
       matrix:
         include:
+          # x86 family
           - arch: x86_64
             target: x86_64-unknown-linux-musl
           - arch: i686
             target: i686-unknown-linux-musl
+          # ARM family
           - arch: aarch64
             target: aarch64-unknown-linux-musl
           - arch: armv7
             target: armv7-unknown-linux-musleabihf
+          - arch: armv7-hf
+            target: armv7-unknown-linux-musleabi
           - arch: arm
             target: arm-unknown-linux-musleabi
+          - arch: armv5te
+            target: armv5te-unknown-linux-musleabi
+          - arch: thumbv7neon
+            target: thumbv7neon-unknown-linux-musleabihf
+          # MIPS family
+          - arch: mips
+            target: mips-unknown-linux-musl
+          - arch: mipsel
+            target: mipsel-unknown-linux-musl
+          - arch: mips64
+            target: mips64-unknown-linux-muslabi64
+          - arch: mips64el
+            target: mips64el-unknown-linux-muslabi64
+          # PowerPC family
+          - arch: powerpc
+            target: powerpc-unknown-linux-gnu
+          - arch: powerpc64
+            target: powerpc64-unknown-linux-gnu
+          - arch: powerpc64le
+            target: powerpc64le-unknown-linux-gnu
+          # RISC-V
+          - arch: riscv64
+            target: riscv64gc-unknown-linux-gnu
+          # IBM Z
+          - arch: s390x
+            target: s390x-unknown-linux-gnu
+          # SPARC
+          - arch: sparc64
+            target: sparc64-unknown-linux-gnu
+          # LoongArch
+          - arch: loongarch64
+            target: loongarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
@@ -139,7 +175,21 @@ jobs:
             artifacts/pairqr-linux-i686/pairqr-linux-i686.tar.gz
             artifacts/pairqr-linux-aarch64/pairqr-linux-aarch64.tar.gz
             artifacts/pairqr-linux-armv7/pairqr-linux-armv7.tar.gz
+            artifacts/pairqr-linux-armv7-hf/pairqr-linux-armv7-hf.tar.gz
             artifacts/pairqr-linux-arm/pairqr-linux-arm.tar.gz
+            artifacts/pairqr-linux-armv5te/pairqr-linux-armv5te.tar.gz
+            artifacts/pairqr-linux-thumbv7neon/pairqr-linux-thumbv7neon.tar.gz
+            artifacts/pairqr-linux-mips/pairqr-linux-mips.tar.gz
+            artifacts/pairqr-linux-mipsel/pairqr-linux-mipsel.tar.gz
+            artifacts/pairqr-linux-mips64/pairqr-linux-mips64.tar.gz
+            artifacts/pairqr-linux-mips64el/pairqr-linux-mips64el.tar.gz
+            artifacts/pairqr-linux-powerpc/pairqr-linux-powerpc.tar.gz
+            artifacts/pairqr-linux-powerpc64/pairqr-linux-powerpc64.tar.gz
+            artifacts/pairqr-linux-powerpc64le/pairqr-linux-powerpc64le.tar.gz
+            artifacts/pairqr-linux-riscv64/pairqr-linux-riscv64.tar.gz
+            artifacts/pairqr-linux-s390x/pairqr-linux-s390x.tar.gz
+            artifacts/pairqr-linux-sparc64/pairqr-linux-sparc64.tar.gz
+            artifacts/pairqr-linux-loongarch64/pairqr-linux-loongarch64.tar.gz
             artifacts/pairqr-windows-x64/pairqr-windows-x64.zip
             artifacts/pairqr-windows-x86/pairqr-windows-x86.zip
           generate_release_notes: true
