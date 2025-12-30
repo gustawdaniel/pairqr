@@ -188,8 +188,21 @@ async fn main() {
                 ServiceEvent::ServiceResolved(info) => {
                     println!("\n[+] Device found: {}", info.get_fullname());
 
-                    if let Some(addr) = info.get_addresses().iter().next() {
-                        let ip = addr.to_string();
+                    // Prefer IPv4 addresses over IPv6 (ADB has issues with IPv6 link-local)
+                    let addresses: Vec<_> = info.get_addresses().iter().collect();
+                    let addr = addresses
+                        .iter()
+                        .find(|a| a.is_ipv4())
+                        .or(addresses.first())
+                        .copied();
+
+                    if let Some(addr) = addr {
+                        // Format IPv6 addresses with brackets for adb
+                        let ip = if addr.is_ipv6() {
+                            format!("[{}]", addr)
+                        } else {
+                            addr.to_string()
+                        };
                         let port = info.get_port();
 
                         println!("    Server: {}", info.get_hostname());
