@@ -6,6 +6,8 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use qrcode::QrCode;
 use rand::Rng;
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -153,6 +155,22 @@ fn adb_connect(ip: &str, port: u16) -> bool {
     }
 }
 
+/// Get the preferred IP address (IPv4 over IPv6) and format it for ADB
+fn get_preferred_ip(addresses: &std::collections::HashSet<IpAddr>) -> Option<String> {
+    let addresses: Vec<_> = addresses.iter().collect();
+    let addr = addresses
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or(addresses.first())
+        .copied()?;
+
+    Some(if addr.is_ipv6() {
+        format!("[{}]", addr)
+    } else {
+        addr.to_string()
+    })
+}
+
 /// Show connected devices
 fn show_devices() {
     println!("\n[*] Connected devices:");
@@ -204,39 +222,47 @@ async fn main() {
         }
     };
 
-    // Browse for ADB pairing services
-    let receiver = match mdns.browse(PAIRING_SERVICE) {
+    // Browse for both pairing and connect services from the start
+    // (connect service is advertised before pairing happens)
+    let pairing_receiver = match mdns.browse(PAIRING_SERVICE) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Failed to browse for services: {}", e);
+            eprintln!("Failed to browse for pairing services: {}", e);
             return;
         }
     };
 
-    let mut paired = false;
+    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to browse for connect services: {}", e);
+            return;
+        }
+    };
 
-    // Main event loop
+    // Store discovered connect services (IP -> port)
+    let mut connect_services: HashMap<String, u16> = HashMap::new();
+    let mut paired = false;
+    let mut paired_ip: Option<String> = None;
+
+    // Main event loop - wait for pairing while collecting connect services
     while running.load(Ordering::SeqCst) && !paired {
-        match receiver.recv_timeout(Duration::from_millis(100)) {
+        // Check for connect services (non-blocking)
+        while let Ok(event) = connect_receiver.recv_timeout(Duration::from_millis(0)) {
+            if let ServiceEvent::ServiceResolved(info) = event {
+                if let Some(ip) = get_preferred_ip(info.get_addresses()) {
+                    connect_services.insert(ip, info.get_port());
+                }
+            }
+        }
+
+        // Check for pairing services
+        match pairing_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => match event {
                 ServiceEvent::ServiceResolved(info) => {
                     println!("\n[+] Device found: {}", info.get_fullname());
 
-                    // Prefer IPv4 addresses over IPv6 (ADB has issues with IPv6 link-local)
-                    let addresses: Vec<_> = info.get_addresses().iter().collect();
-                    let addr = addresses
-                        .iter()
-                        .find(|a| a.is_ipv4())
-                        .or(addresses.first())
-                        .copied();
-
-                    if let Some(addr) = addr {
-                        // Format IPv6 addresses with brackets for adb
-                        let ip = if addr.is_ipv6() {
-                            format!("[{}]", addr)
-                        } else {
-                            addr.to_string()
-                        };
+                    if let Some(ip) = get_preferred_ip(info.get_addresses()) {
                         let port = info.get_port();
 
                         println!("    Server: {}", info.get_hostname());
@@ -244,6 +270,7 @@ async fn main() {
 
                         if adb_pair(&ip, port, &password) {
                             paired = true;
+                            paired_ip = Some(ip);
                         }
                     }
                 }
@@ -268,52 +295,43 @@ async fn main() {
         return;
     }
 
-    // Now discover and connect to the device's connect service
+    // Try to connect using discovered connect services
     println!("\n[*] Looking for device connect service...");
 
-    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to browse for connect services: {}", e);
-            let _ = mdns.shutdown();
-            return;
-        }
-    };
-
     let mut connected = false;
-    let timeout = std::time::Instant::now();
 
-    while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(10) {
-        match connect_receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(event) => {
-                if let ServiceEvent::ServiceResolved(info) = event {
-                    // Prefer IPv4 addresses
-                    let addresses: Vec<_> = info.get_addresses().iter().collect();
-                    let addr = addresses
-                        .iter()
-                        .find(|a| a.is_ipv4())
-                        .or(addresses.first())
-                        .copied();
+    // First check if we already discovered the connect service for this IP
+    if let Some(ref ip) = paired_ip {
+        if let Some(&port) = connect_services.get(ip) {
+            println!("[+] Connect service found (cached): {}:{}", ip, port);
+            if adb_connect(ip, port) {
+                connected = true;
+            }
+        }
+    }
 
-                    if let Some(addr) = addr {
-                        let ip = if addr.is_ipv6() {
-                            format!("[{}]", addr)
-                        } else {
-                            addr.to_string()
-                        };
-                        let port = info.get_port();
+    // If not found in cache, wait for more discoveries
+    if !connected {
+        let timeout = std::time::Instant::now();
 
-                        println!("\n[+] Connect service found: {}", info.get_fullname());
-                        println!("    Port: {}", port);
+        while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(10) {
+            match connect_receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(event) => {
+                    if let ServiceEvent::ServiceResolved(info) = event {
+                        if let Some(ip) = get_preferred_ip(info.get_addresses()) {
+                            let port = info.get_port();
 
-                        if adb_connect(&ip, port) {
-                            connected = true;
+                            println!("[+] Connect service found: {}:{}", ip, port);
+
+                            if adb_connect(&ip, port) {
+                                connected = true;
+                            }
                         }
                     }
                 }
+                Err(flume::RecvTimeoutError::Timeout) => continue,
+                Err(flume::RecvTimeoutError::Disconnected) => break,
             }
-            Err(flume::RecvTimeoutError::Timeout) => continue,
-            Err(flume::RecvTimeoutError::Disconnected) => break,
         }
     }
 
