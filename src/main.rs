@@ -12,7 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// mDNS service type for ADB pairing
-const SERVICE_TYPE: &str = "_adb-tls-pairing._tcp.local.";
+const PAIRING_SERVICE: &str = "_adb-tls-pairing._tcp.local.";
+
+/// mDNS service type for ADB connect (after pairing)
+const CONNECT_SERVICE: &str = "_adb-tls-connect._tcp.local.";
 
 /// Characters for random name generation
 const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -119,6 +122,37 @@ fn adb_pair(ip: &str, port: u16, password: &str) -> bool {
     }
 }
 
+/// Run adb connect command
+fn adb_connect(ip: &str, port: u16) -> bool {
+    println!("[*] Running: adb connect {}:{}", ip, port);
+
+    let output = Command::new("adb")
+        .args(["connect", &format!("{}:{}", ip, port)])
+        .output();
+
+    match output {
+        Ok(result) => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            let stderr = String::from_utf8_lossy(&result.stderr);
+
+            if result.status.success() && (stdout.contains("connected") || stdout.contains("already")) {
+                println!("[+] Connected successfully!");
+                true
+            } else {
+                println!(
+                    "[-] Connect failed: {}",
+                    if stderr.is_empty() { &stdout } else { &stderr }
+                );
+                false
+            }
+        }
+        Err(e) => {
+            println!("[-] Failed to run adb: {}", e);
+            false
+        }
+    }
+}
+
 /// Show connected devices
 fn show_devices() {
     println!("\n[*] Connected devices:");
@@ -171,7 +205,7 @@ async fn main() {
     };
 
     // Browse for ADB pairing services
-    let receiver = match mdns.browse(SERVICE_TYPE) {
+    let receiver = match mdns.browse(PAIRING_SERVICE) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to browse for services: {}", e);
@@ -210,7 +244,6 @@ async fn main() {
 
                         if adb_pair(&ip, port, &password) {
                             paired = true;
-                            show_devices();
                         }
                     }
                 }
@@ -226,11 +259,72 @@ async fn main() {
 
     if !running.load(Ordering::SeqCst) {
         println!("\n\n[*] Cancelled by user");
+        let _ = mdns.shutdown();
+        return;
+    }
+
+    if !paired {
+        let _ = mdns.shutdown();
+        return;
+    }
+
+    // Now discover and connect to the device's connect service
+    println!("\n[*] Looking for device connect service...");
+
+    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to browse for connect services: {}", e);
+            let _ = mdns.shutdown();
+            return;
+        }
+    };
+
+    let mut connected = false;
+    let timeout = std::time::Instant::now();
+
+    while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(10) {
+        match connect_receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(event) => {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    // Prefer IPv4 addresses
+                    let addresses: Vec<_> = info.get_addresses().iter().collect();
+                    let addr = addresses
+                        .iter()
+                        .find(|a| a.is_ipv4())
+                        .or(addresses.first())
+                        .copied();
+
+                    if let Some(addr) = addr {
+                        let ip = if addr.is_ipv6() {
+                            format!("[{}]", addr)
+                        } else {
+                            addr.to_string()
+                        };
+                        let port = info.get_port();
+
+                        println!("\n[+] Connect service found: {}", info.get_fullname());
+                        println!("    Port: {}", port);
+
+                        if adb_connect(&ip, port) {
+                            connected = true;
+                        }
+                    }
+                }
+            }
+            Err(flume::RecvTimeoutError::Timeout) => continue,
+            Err(flume::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    if !connected {
+        println!("[-] Could not auto-connect. You may need to connect manually.");
+        println!("    Check 'Wireless Debugging' on your device for the IP & port,");
+        println!("    then run: adb connect <ip>:<port>");
     }
 
     // Cleanup
     let _ = mdns.shutdown();
 
-    println!("\n[*] Final device list:");
     show_devices();
 }
