@@ -28,7 +28,7 @@ This document tracks package managers where pairqr should be published. Once a p
 ## Linux
 
 ### crates.io / cargo install (Priority: High)
-- **Status:** Not started
+- **Status:** Done
 - **Effort:** Low
 - **Description:** Rust's official package registry - targets Rust developers
 - **Approach:** `cargo publish` to crates.io

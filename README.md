@@ -21,10 +21,10 @@ scoop bucket add richard-fairthorne https://github.com/richard-fairthorne/scoop-
 scoop install pairqr
 ```
 
-### From Source
+### Cargo (Rust)
 
 ```bash
-cargo install --path .
+cargo install pairqr
 ```
 
 ### Pre-built Binaries
