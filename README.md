@@ -2,6 +2,8 @@
 
 A command-line tool to pair Android devices for wireless ADB debugging by scanning a QR code, just like Android Studio.
 
+**GitHub:** https://github.com/richard-fairthorne/pairqr
+
 ![pairqr screenshot](assets/screenshot.png)
 
 ## Installation
