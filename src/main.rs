@@ -6,7 +6,6 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use qrcode::QrCode;
 use rand::Rng;
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,9 +14,6 @@ use std::time::Duration;
 
 /// mDNS service type for ADB pairing
 const PAIRING_SERVICE: &str = "_adb-tls-pairing._tcp.local.";
-
-/// mDNS service type for ADB connect (after pairing)
-const CONNECT_SERVICE: &str = "_adb-tls-connect._tcp.local.";
 
 /// Characters for random name generation
 const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -124,37 +120,6 @@ fn adb_pair(ip: &str, port: u16, password: &str) -> bool {
     }
 }
 
-/// Run adb connect command
-fn adb_connect(ip: &str, port: u16) -> bool {
-    println!("[*] Running: adb connect {}:{}", ip, port);
-
-    let output = Command::new("adb")
-        .args(["connect", &format!("{}:{}", ip, port)])
-        .output();
-
-    match output {
-        Ok(result) => {
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let stderr = String::from_utf8_lossy(&result.stderr);
-
-            if result.status.success() && (stdout.contains("connected") || stdout.contains("already")) {
-                println!("[+] Connected successfully!");
-                true
-            } else {
-                println!(
-                    "[-] Connect failed: {}",
-                    if stderr.is_empty() { &stdout } else { &stderr }
-                );
-                false
-            }
-        }
-        Err(e) => {
-            println!("[-] Failed to run adb: {}", e);
-            false
-        }
-    }
-}
-
 /// Get the preferred IP address (IPv4 over IPv6) and format it for ADB
 fn get_preferred_ip(addresses: &std::collections::HashSet<IpAddr>) -> Option<String> {
     let addresses: Vec<_> = addresses.iter().collect();
@@ -187,7 +152,7 @@ async fn main() {
     let qr_text = format!("WIFI:T:ADB;S:{};P:{};;", name, password);
 
     println!("{}", "=".repeat(50));
-    println!("  ADB Wireless Debugging - QR Code Pairing");
+    println!("  pairqr v{} - ADB Wireless Debugging", env!("CARGO_PKG_VERSION"));
     println!("{}", "=".repeat(50));
     println!();
 
@@ -222,8 +187,7 @@ async fn main() {
         }
     };
 
-    // Browse for both pairing and connect services from the start
-    // (connect service is advertised before pairing happens)
+    // Browse for pairing services
     let pairing_receiver = match mdns.browse(PAIRING_SERVICE) {
         Ok(r) => r,
         Err(e) => {
@@ -232,31 +196,10 @@ async fn main() {
         }
     };
 
-    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to browse for connect services: {}", e);
-            return;
-        }
-    };
-
-    // Store discovered connect services (IP -> port)
-    let mut connect_services: HashMap<String, u16> = HashMap::new();
     let mut paired = false;
-    let mut paired_ip: Option<String> = None;
 
-    // Main event loop - wait for pairing while collecting connect services
+    // Wait for pairing
     while running.load(Ordering::SeqCst) && !paired {
-        // Check for connect services (non-blocking)
-        while let Ok(event) = connect_receiver.recv_timeout(Duration::from_millis(0)) {
-            if let ServiceEvent::ServiceResolved(info) = event {
-                if let Some(ip) = get_preferred_ip(info.get_addresses()) {
-                    connect_services.insert(ip, info.get_port());
-                }
-            }
-        }
-
-        // Check for pairing services
         match pairing_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => match event {
                 ServiceEvent::ServiceResolved(info) => {
@@ -270,7 +213,6 @@ async fn main() {
 
                         if adb_pair(&ip, port, &password) {
                             paired = true;
-                            paired_ip = Some(ip);
                         }
                     }
                 }
@@ -295,43 +237,50 @@ async fn main() {
         return;
     }
 
-    // Try to connect using discovered connect services
+    // Shutdown our mDNS - we'll use ADB's built-in mdns instead
+    let _ = mdns.shutdown();
+
+    // Wait a moment for the device to settle after pairing dialog closes
     println!("\n[*] Looking for device connect service...");
+    std::thread::sleep(Duration::from_millis(500));
 
+    // Try to find connect service using ADB's built-in mdns
     let mut connected = false;
+    let timeout = std::time::Instant::now();
 
-    // First check if we already discovered the connect service for this IP
-    if let Some(ref ip) = paired_ip {
-        if let Some(&port) = connect_services.get(ip) {
-            println!("[+] Connect service found (cached): {}:{}", ip, port);
-            if adb_connect(ip, port) {
-                connected = true;
-            }
-        }
-    }
+    while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(15) {
+        if let Ok(output) = Command::new("adb").args(["mdns", "services"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // If not found in cache, wait for more discoveries
-    if !connected {
-        let timeout = std::time::Instant::now();
+            // Parse adb mdns services output for connect services
+            // Format: "adb-SERIAL-XXXXXX	_adb-tls-connect._tcp.	IP:PORT"
+            for line in stdout.lines() {
+                if line.contains("_adb-tls-connect._tcp") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 3 {
+                        let addr = parts[2]; // IP:PORT
+                        println!("[+] Connect service found: {}", addr);
 
-        while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(10) {
-            match connect_receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(event) => {
-                    if let ServiceEvent::ServiceResolved(info) = event {
-                        if let Some(ip) = get_preferred_ip(info.get_addresses()) {
-                            let port = info.get_port();
+                        // Try to connect
+                        let connect_output = Command::new("adb")
+                            .args(["connect", addr])
+                            .output();
 
-                            println!("[+] Connect service found: {}:{}", ip, port);
-
-                            if adb_connect(&ip, port) {
+                        if let Ok(result) = connect_output {
+                            let out = String::from_utf8_lossy(&result.stdout);
+                            if out.contains("connected") || out.contains("already") {
+                                println!("[+] Connected successfully!");
                                 connected = true;
+                                break;
                             }
                         }
                     }
                 }
-                Err(flume::RecvTimeoutError::Timeout) => continue,
-                Err(flume::RecvTimeoutError::Disconnected) => break,
             }
+        }
+
+        if !connected {
+            std::thread::sleep(Duration::from_millis(500));
         }
     }
 
@@ -340,9 +289,6 @@ async fn main() {
         println!("    Check 'Wireless Debugging' on your device for the IP & port,");
         println!("    then run: adb connect <ip>:<port>");
     }
-
-    // Cleanup
-    let _ = mdns.shutdown();
 
     show_devices();
 }
