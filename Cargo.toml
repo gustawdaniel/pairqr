@@ -1,6 +1,6 @@
 [package]
 name = "pairqr"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 description = "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
 license = "GPL-3.0"
@@ -16,6 +16,32 @@ rand = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 ctrlc = "3.4"
 flume = "0.11"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-windows-x64.zip"
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-macos-universal.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/pairqr-macos-universal.tar.gz"
 
 [profile.release]
 lto = true
