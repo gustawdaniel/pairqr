@@ -1,10 +1,10 @@
 [package]
 name = "pairqr"
-version = "1.0.0"
+version = "0.1.5"
 edition = "2021"
 description = "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
 license = "GPL-3.0"
-repository = "https://github.com/richard-fairthorne/adb-pair"
+repository = "https://github.com/richard-fairthorne/pairqr"
 
 [dependencies]
 mdns-sd = "0.11"
