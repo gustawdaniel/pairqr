@@ -46,6 +46,45 @@ jobs:
           name: pairqr-macos-universal
           path: pairqr-macos-universal.tar.gz
 
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - arch: i686
+            target: i686-unknown-linux-musl
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+          - arch: armv7
+            target: armv7-unknown-linux-musleabihf
+          - arch: arm
+            target: arm-unknown-linux-musleabi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Package Linux
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../pairqr-linux-${{ matrix.arch }}.tar.gz pairqr
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairqr-linux-${{ matrix.arch }}
+          path: pairqr-linux-${{ matrix.arch }}.tar.gz
+
   build-windows:
     name: Build Windows ${{ matrix.arch }}
     runs-on: windows-latest
@@ -80,7 +119,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-macos-universal, build-windows]
+    needs: [build-macos-universal, build-linux, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -96,6 +135,11 @@ jobs:
         with:
           files: |
             artifacts/pairqr-macos-universal/pairqr-macos-universal.tar.gz
+            artifacts/pairqr-linux-x86_64/pairqr-linux-x86_64.tar.gz
+            artifacts/pairqr-linux-i686/pairqr-linux-i686.tar.gz
+            artifacts/pairqr-linux-aarch64/pairqr-linux-aarch64.tar.gz
+            artifacts/pairqr-linux-armv7/pairqr-linux-armv7.tar.gz
+            artifacts/pairqr-linux-arm/pairqr-linux-arm.tar.gz
             artifacts/pairqr-windows-x64/pairqr-windows-x64.zip
             artifacts/pairqr-windows-x86/pairqr-windows-x86.zip
           generate_release_notes: true
