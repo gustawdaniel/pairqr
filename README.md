@@ -8,13 +8,28 @@ A command-line tool to pair Android devices for wireless ADB debugging by scanni
 
 ## Installation
 
-Pre-built binaries are available on the [Releases](https://github.com/richard-fairthorne/pairqr/releases) page.
+### macOS (Homebrew)
 
-Or build from source:
+```bash
+brew install richard-fairthorne/tap/pairqr
+```
+
+### Windows (Scoop)
+
+```powershell
+scoop bucket add richard-fairthorne https://github.com/richard-fairthorne/scoop-bucket
+scoop install pairqr
+```
+
+### From Source
 
 ```bash
 cargo install --path .
 ```
+
+### Pre-built Binaries
+
+Pre-built binaries for macOS, Linux, and Windows are available on the [Releases](https://github.com/richard-fairthorne/pairqr/releases) page.
 
 **Requirement:** ADB must be installed and in your PATH.
 

@@ -7,7 +7,7 @@ This document tracks package managers where pairqr should be published. Once a p
 ## macOS
 
 ### Homebrew (Priority: High)
-- **Status:** Not started
+- **Status:** Done
 - **Effort:** Medium
 - **Description:** The most popular package manager for macOS, also available for Linux
 - **Approach:** Create a Homebrew tap repository (`homebrew-pairqr`) with a formula that downloads pre-built binaries from GitHub Releases
@@ -93,7 +93,7 @@ This document tracks package managers where pairqr should be published. Once a p
 ## Windows
 
 ### Scoop (Priority: High)
-- **Status:** Not started
+- **Status:** Done
 - **Effort:** Low
 - **Description:** Command-line installer for Windows, focused on CLI tools. No admin required.
 - **Approach:** Create a manifest JSON and submit to scoop-extras bucket or create own bucket
