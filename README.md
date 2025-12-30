@@ -2,16 +2,19 @@
 
 Pair Android devices for wireless ADB debugging by scanning a QR code, just like Android Studio.
 
-## Requirements
-
-- Rust toolchain
-- ADB in your PATH
+![pairqr screenshot](assets/screenshot.png)
 
 ## Installation
+
+Pre-built binaries are available on the [Releases](https://github.com/richard-fairthorne/pairqr/releases) page.
+
+Or build from source:
 
 ```bash
 cargo install --path .
 ```
+
+**Requirement:** ADB must be installed and in your PATH.
 
 ## Usage
 
