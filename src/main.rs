@@ -152,6 +152,16 @@ fn get_preferred_ip(addresses: &std::collections::HashSet<IpAddr>) -> Option<Str
     })
 }
 
+/// Disconnect from a specific ADB address
+fn adb_disconnect(addr: &str) {
+    if let Ok(result) = Command::new("adb").args(["disconnect", addr]).output() {
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        if !stdout.trim().is_empty() {
+            println!("    adb: {}", stdout.trim());
+        }
+    }
+}
+
 /// Show connected devices
 fn show_devices() {
     println!("\n[*] Connected devices:");
@@ -223,6 +233,7 @@ async fn main() {
     let mut paired = false;
     let mut device_guid: Option<String> = None;
     let mut device_ip: Option<String> = None;
+    let mut pairing_port: Option<u16> = None;
 
     // Wait for pairing
     while running.load(Ordering::SeqCst) && !paired {
@@ -242,6 +253,7 @@ async fn main() {
                             paired = true;
                             device_guid = guid;
                             device_ip = Some(ip);
+                            pairing_port = Some(port);
                         }
                     }
                 }
@@ -380,6 +392,15 @@ async fn main() {
     // Cleanup
     let _ = mdns.shutdown();
 
+    // Disconnect from pairing endpoint to avoid duplicate device entries
+    if connected {
+        if let (Some(ref ip), Some(port)) = (&device_ip, pairing_port) {
+            let pairing_addr = format!("{}:{}", ip, port);
+            println!("[*] Disconnecting pairing endpoint: {}", pairing_addr);
+            adb_disconnect(&pairing_addr);
+        }
+    }
+
     if !connected {
         // Prompt for manual port entry
         if let Some(ref ip) = device_ip {
@@ -407,6 +428,13 @@ async fn main() {
                             if out.contains("connected") || out.contains("already") {
                                 println!("[+] Connected!");
                                 connected = true;
+
+                                // Disconnect from pairing endpoint
+                                if let Some(pport) = pairing_port {
+                                    let pairing_addr = format!("{}:{}", ip, pport);
+                                    println!("[*] Disconnecting pairing endpoint: {}", pairing_addr);
+                                    adb_disconnect(&pairing_addr);
+                                }
                             }
                         }
                     } else {
