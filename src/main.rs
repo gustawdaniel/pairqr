@@ -392,12 +392,14 @@ async fn main() {
     // Cleanup
     let _ = mdns.shutdown();
 
-    // Disconnect from pairing endpoint to avoid duplicate device entries
+    // Disconnect from mDNS service entry to avoid duplicate device entries
+    // ADB auto-connects via mDNS when it sees the _adb-tls-connect service,
+    // creating a duplicate entry alongside our explicit IP:port connection
     if connected {
-        if let (Some(ref ip), Some(port)) = (&device_ip, pairing_port) {
-            let pairing_addr = format!("{}:{}", ip, port);
-            println!("[*] Disconnecting pairing endpoint: {}", pairing_addr);
-            adb_disconnect(&pairing_addr);
+        if let Some(ref guid) = device_guid {
+            let mdns_addr = format!("{}._adb-tls-connect._tcp", guid);
+            println!("[*] Disconnecting mDNS service entry: {}", mdns_addr);
+            adb_disconnect(&mdns_addr);
         }
     }
 
