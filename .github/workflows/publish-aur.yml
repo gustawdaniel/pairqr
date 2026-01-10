@@ -1,0 +1,105 @@
+name: Publish to AUR
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: true
+
+jobs:
+  aur:
+    name: Update AUR Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Download source tarball and calculate SHA256
+        id: source
+        run: |
+          curl -sL "https://github.com/richard-fairthorne/pairqr/archive/refs/tags/v${{ steps.version.outputs.version }}.tar.gz" -o source.tar.gz
+          echo "sha256=$(sha256sum source.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Generate PKGBUILD
+        run: |
+          mkdir -p aur-package
+          cat > aur-package/PKGBUILD << 'EOF'
+          # Maintainer: Richard Fairthorne <richard@fairthorne.net>
+          pkgname=pairqr
+          pkgver=${{ steps.version.outputs.version }}
+          pkgrel=1
+          pkgdesc="ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
+          arch=('x86_64' 'aarch64')
+          url="https://github.com/richard-fairthorne/pairqr"
+          license=('GPL-3.0-only')
+          depends=('android-tools')
+          makedepends=('cargo')
+          source=("$pkgname-$pkgver.tar.gz::https://github.com/richard-fairthorne/pairqr/archive/refs/tags/v$pkgver.tar.gz")
+          sha256sums=('${{ steps.source.outputs.sha256 }}')
+
+          prepare() {
+              cd "$pkgname-$pkgver"
+              export RUSTUP_TOOLCHAIN=stable
+              cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+          }
+
+          build() {
+              cd "$pkgname-$pkgver"
+              export RUSTUP_TOOLCHAIN=stable
+              export CARGO_TARGET_DIR=target
+              cargo build --frozen --release --all-features
+          }
+
+          check() {
+              cd "$pkgname-$pkgver"
+              export RUSTUP_TOOLCHAIN=stable
+              cargo test --frozen --all-features
+          }
+
+          package() {
+              cd "$pkgname-$pkgver"
+              install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
+          }
+          EOF
+
+      - name: Generate .SRCINFO
+        run: |
+          cat > aur-package/.SRCINFO << EOF
+          pkgbase = pairqr
+          	pkgdesc = ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing
+          	pkgver = ${{ steps.version.outputs.version }}
+          	pkgrel = 1
+          	url = https://github.com/richard-fairthorne/pairqr
+          	arch = x86_64
+          	arch = aarch64
+          	license = GPL-3.0-only
+          	makedepends = cargo
+          	depends = android-tools
+          	source = pairqr-${{ steps.version.outputs.version }}.tar.gz::https://github.com/richard-fairthorne/pairqr/archive/refs/tags/v${{ steps.version.outputs.version }}.tar.gz
+          	sha256sums = ${{ steps.source.outputs.sha256 }}
+
+          pkgname = pairqr
+          EOF
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: pairqr
+          pkgbuild: aur-package/PKGBUILD
+          commit_username: Richard Fairthorne
+          commit_email: richard@fairthorne.net
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ steps.version.outputs.version }}"
+          force_push: true

@@ -1,0 +1,88 @@
+name: Update Scoop Bucket
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: true
+
+jobs:
+  scoop:
+    name: Update Scoop Manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Download Windows x64 binary and calculate SHA256
+        id: win64
+        run: |
+          curl -sL "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-windows-x64.zip" -o win64.zip
+          echo "sha256=$(sha256sum win64.zip | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Download Windows x86 binary and calculate SHA256
+        id: win32
+        run: |
+          curl -sL "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-windows-x86.zip" -o win32.zip
+          echo "sha256=$(sha256sum win32.zip | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Checkout Scoop bucket
+        uses: actions/checkout@v4
+        with:
+          repository: richard-fairthorne/scoop-bucket
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          path: scoop-bucket
+
+      - name: Update manifest
+        run: |
+          cat > scoop-bucket/bucket/pairqr.json << EOF
+          {
+              "version": "${{ steps.version.outputs.version }}",
+              "description": "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing",
+              "homepage": "https://github.com/richard-fairthorne/pairqr",
+              "license": "GPL-3.0",
+              "architecture": {
+                  "64bit": {
+                      "url": "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-windows-x64.zip",
+                      "hash": "${{ steps.win64.outputs.sha256 }}"
+                  },
+                  "32bit": {
+                      "url": "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-windows-x86.zip",
+                      "hash": "${{ steps.win32.outputs.sha256 }}"
+                  }
+              },
+              "bin": "pairqr.exe",
+              "checkver": "github",
+              "autoupdate": {
+                  "architecture": {
+                      "64bit": {
+                          "url": "https://github.com/richard-fairthorne/pairqr/releases/download/v\$version/pairqr-windows-x64.zip"
+                      },
+                      "32bit": {
+                          "url": "https://github.com/richard-fairthorne/pairqr/releases/download/v\$version/pairqr-windows-x86.zip"
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Commit and push
+        run: |
+          cd scoop-bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/pairqr.json
+          git commit -m "Update pairqr to ${{ steps.version.outputs.version }}"
+          git push

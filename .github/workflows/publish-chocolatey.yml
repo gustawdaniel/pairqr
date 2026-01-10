@@ -1,0 +1,107 @@
+name: Publish to Chocolatey
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: true
+
+jobs:
+  chocolatey:
+    name: Publish to Chocolatey
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        shell: bash
+        run: sleep 60
+
+      - name: Download Windows x64 binary and calculate SHA256
+        id: win64
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          Invoke-WebRequest -Uri "https://github.com/richard-fairthorne/pairqr/releases/download/v${version}/pairqr-windows-x64.zip" -OutFile win64.zip
+          $hash = (Get-FileHash win64.zip -Algorithm SHA256).Hash
+          echo "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Create Chocolatey package structure
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $sha256 = "${{ steps.win64.outputs.sha256 }}"
+
+          New-Item -ItemType Directory -Force -Path choco/tools
+
+          # Create nuspec file
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+            <metadata>
+              <id>pairqr</id>
+              <version>$version</version>
+              <title>pairqr</title>
+              <authors>Richard Fairthorne</authors>
+              <owners>richard-fairthorne</owners>
+              <licenseUrl>https://github.com/richard-fairthorne/pairqr/blob/main/LICENSE</licenseUrl>
+              <projectUrl>https://github.com/richard-fairthorne/pairqr</projectUrl>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing, just like Android Studio.</description>
+              <summary>Generate QR codes for wireless ADB pairing</summary>
+              <tags>adb android qrcode wireless debugging cli</tags>
+              <dependencies>
+                <dependency id="adb" />
+              </dependencies>
+            </metadata>
+          </package>
+          "@ | Out-File -FilePath choco/pairqr.nuspec -Encoding utf8
+
+          # Create install script
+          @"
+          `$ErrorActionPreference = 'Stop'
+          `$toolsDir = "`$(Split-Path -Parent `$MyInvocation.MyCommand.Definition)"
+          `$url64 = 'https://github.com/richard-fairthorne/pairqr/releases/download/v$version/pairqr-windows-x64.zip'
+
+          `$packageArgs = @{
+            packageName   = 'pairqr'
+            unzipLocation = `$toolsDir
+            url64bit      = `$url64
+            checksum64    = '$sha256'
+            checksumType64= 'sha256'
+          }
+
+          Install-ChocolateyZipPackage @packageArgs
+          "@ | Out-File -FilePath choco/tools/chocolateyinstall.ps1 -Encoding utf8
+
+          # Create uninstall script
+          @"
+          `$ErrorActionPreference = 'Stop'
+          `$toolsDir = "`$(Split-Path -Parent `$MyInvocation.MyCommand.Definition)"
+          Remove-Item -Path "`$toolsDir\pairqr.exe" -Force -ErrorAction SilentlyContinue
+          "@ | Out-File -FilePath choco/tools/chocolateyuninstall.ps1 -Encoding utf8
+
+      - name: Build Chocolatey package
+        shell: pwsh
+        run: |
+          cd choco
+          choco pack
+
+      - name: Push to Chocolatey
+        shell: pwsh
+        run: |
+          cd choco
+          choco push pairqr.${{ steps.version.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}

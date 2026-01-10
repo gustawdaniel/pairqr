@@ -1,0 +1,47 @@
+name: Submit to winget
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: true
+
+jobs:
+  winget:
+    name: Submit to winget-pkgs
+    runs-on: windows-latest
+    steps:
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        shell: bash
+        run: sleep 60
+
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+      - name: Submit to winget-pkgs
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $url64 = "https://github.com/richard-fairthorne/pairqr/releases/download/v${version}/pairqr-windows-x64.zip"
+          $url32 = "https://github.com/richard-fairthorne/pairqr/releases/download/v${version}/pairqr-windows-x86.zip"
+
+          .\wingetcreate.exe update RichardFairthorne.pairqr `
+            --version $version `
+            --urls $url64 $url32 `
+            --submit `
+            --token ${{ secrets.WINGET_GITHUB_TOKEN }}

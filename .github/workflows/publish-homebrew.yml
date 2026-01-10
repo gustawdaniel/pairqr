@@ -1,0 +1,86 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: true
+
+jobs:
+  homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Download macOS binary and calculate SHA256
+        id: macos
+        run: |
+          curl -sL "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-macos-universal.tar.gz" -o macos.tar.gz
+          echo "sha256=$(sha256sum macos.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Download Linux x86_64 binary and calculate SHA256
+        id: linux
+        run: |
+          curl -sL "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-linux-x86_64.tar.gz" -o linux.tar.gz
+          echo "sha256=$(sha256sum linux.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: richard-fairthorne/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          cat > homebrew-tap/Formula/pairqr.rb << 'EOF'
+          class Pairqr < Formula
+            desc "ADB QR Code Pairing Tool - Generates a QR code for Android wireless debugging pairing"
+            homepage "https://github.com/richard-fairthorne/pairqr"
+            version "${{ steps.version.outputs.version }}"
+            license "GPL-3.0"
+
+            on_macos do
+              url "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-macos-universal.tar.gz"
+              sha256 "${{ steps.macos.outputs.sha256 }}"
+            end
+
+            on_linux do
+              url "https://github.com/richard-fairthorne/pairqr/releases/download/v${{ steps.version.outputs.version }}/pairqr-linux-x86_64.tar.gz"
+              sha256 "${{ steps.linux.outputs.sha256 }}"
+            end
+
+            depends_on "android-platform-tools"
+
+            def install
+              bin.install "pairqr"
+            end
+
+            test do
+              assert_match "pairqr", shell_output("#{bin}/pairqr --help", 2)
+            end
+          end
+          EOF
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/pairqr.rb
+          git commit -m "Update pairqr to ${{ steps.version.outputs.version }}"
+          git push
