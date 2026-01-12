@@ -15,8 +15,6 @@ use std::time::Duration;
 /// mDNS service type for ADB pairing
 const PAIRING_SERVICE: &str = "_adb-tls-pairing._tcp.local.";
 
-/// mDNS service type for ADB connect
-const CONNECT_SERVICE: &str = "_adb-tls-connect._tcp.local.";
 
 /// Characters for random name generation
 const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -152,16 +150,6 @@ fn get_preferred_ip(addresses: &std::collections::HashSet<IpAddr>) -> Option<Str
     })
 }
 
-/// Disconnect from a specific ADB address
-fn adb_disconnect(addr: &str) {
-    if let Ok(result) = Command::new("adb").args(["disconnect", addr]).output() {
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        if !stdout.trim().is_empty() {
-            println!("    adb: {}", stdout.trim());
-        }
-    }
-}
-
 /// Show connected devices
 fn show_devices() {
     println!("\n[*] Connected devices:");
@@ -222,18 +210,7 @@ async fn main() {
         }
     };
 
-    let connect_receiver = match mdns.browse(CONNECT_SERVICE) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to browse for connect services: {}", e);
-            return;
-        }
-    };
-
     let mut paired = false;
-    let mut device_guid: Option<String> = None;
-    let mut device_ip: Option<String> = None;
-    let mut pairing_port: Option<u16> = None;
 
     // Wait for pairing
     while running.load(Ordering::SeqCst) && !paired {
@@ -248,12 +225,9 @@ async fn main() {
                         println!("    Server: {}", info.get_hostname());
                         println!("    Port: {}", port);
 
-                        let (success, guid) = adb_pair(&ip, port, &password);
+                        let (success, _guid) = adb_pair(&ip, port, &password);
                         if success {
                             paired = true;
-                            device_guid = guid;
-                            device_ip = Some(ip);
-                            pairing_port = Some(port);
                         }
                     }
                 }
@@ -267,188 +241,47 @@ async fn main() {
         }
     }
 
+    // Cleanup mDNS - we're done with pairing discovery
+    let _ = mdns.shutdown();
+
     if !running.load(Ordering::SeqCst) {
         println!("\n\n[*] Cancelled by user");
-        let _ = mdns.shutdown();
         return;
     }
 
     if !paired {
-        let _ = mdns.shutdown();
         return;
     }
 
-    // Wait a moment for the device to settle after pairing dialog closes
-    println!("\n[*] Looking for device connect service...");
+    // ADB auto-connects via its built-in mDNS when it sees the _adb-tls-connect service.
+    // Just wait briefly and verify the connection.
+    println!("\n[*] Waiting for ADB to auto-connect via mDNS...");
 
     let mut connected = false;
     let timeout = std::time::Instant::now();
 
-    // If we have a GUID, try to resolve the specific service using dns-sd (macOS)
-    if let Some(ref guid) = device_guid {
-        let service_name = guid.clone();
-        println!("[*] Looking for service: {}", service_name);
+    while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(500));
 
-        // Use dns-sd -L to resolve the specific service (with timeout via spawn)
-        if let Ok(mut child) = Command::new("dns-sd")
-            .args(["-L", &service_name, "_adb-tls-connect._tcp", "local."])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            // Give dns-sd time to resolve
-            std::thread::sleep(Duration::from_secs(3));
-
-            // Kill it and read output
-            let _ = child.kill();
-            if let Ok(output) = child.wait_with_output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Parse output for port: "can be reached at hostname:port"
-                for line in stdout.lines() {
-                    if line.contains("can be reached at") {
-                        if let Some(addr_part) = line.split("can be reached at ").nth(1) {
-                            // Format: "hostname.local.:PORT (interface X)"
-                            if let Some(port_str) = addr_part.split(':').nth(1) {
-                                if let Some(port_part) = port_str.split_whitespace().next() {
-                                    if let Ok(port) = port_part.parse::<u16>() {
-                                        if let Some(ref ip) = device_ip {
-                                            let addr = format!("{}:{}", ip, port);
-                                            println!("[+] Connect service resolved (dns-sd): {}", addr);
-
-                                            if let Ok(result) = Command::new("adb").args(["connect", &addr]).output() {
-                                                let out = String::from_utf8_lossy(&result.stdout);
-                                                println!("    adb: {}", out.trim());
-                                                if out.contains("connected") || out.contains("already") {
-                                                    println!("[+] Connected!");
-                                                    connected = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+        // Check if ADB has connected via its own mDNS
+        if let Ok(output) = Command::new("adb").args(["devices"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Look for any connected device (not just "offline" or header line)
+            for line in stdout.lines().skip(1) {
+                if line.contains("device") && !line.contains("offline") {
+                    connected = true;
+                    println!("[+] Connected!");
+                    break;
                 }
             }
-        }
-    }
-
-    // Fallback: try other discovery methods
-    while running.load(Ordering::SeqCst) && !connected && timeout.elapsed() < Duration::from_secs(15) {
-        // Check our own mDNS browse
-        while let Ok(event) = connect_receiver.recv_timeout(Duration::from_millis(0)) {
-            if let ServiceEvent::ServiceResolved(info) = event {
-                if let Some(ip) = get_preferred_ip(info.get_addresses()) {
-                    let port = info.get_port();
-                    let addr = format!("{}:{}", ip, port);
-                    println!("[+] Connect service found (mdns-sd): {}", addr);
-
-                    if let Ok(result) = Command::new("adb").args(["connect", &addr]).output() {
-                        let out = String::from_utf8_lossy(&result.stdout);
-                        println!("    adb: {}", out.trim());
-                        if out.contains("connected") || out.contains("already") {
-                            println!("[+] Connected!");
-                            connected = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check ADB's built-in mdns
-        if !connected {
-            if let Ok(output) = Command::new("adb").args(["mdns", "services"]).output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-
-                for line in stdout.lines() {
-                    if line.contains("_adb-tls-connect._tcp") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 3 {
-                            let addr = parts[2];
-                            println!("[+] Connect service found (adb mdns): {}", addr);
-
-                            if let Ok(result) = Command::new("adb").args(["connect", addr]).output() {
-                                let out = String::from_utf8_lossy(&result.stdout);
-                                println!("    adb: {}", out.trim());
-                                if out.contains("connected") || out.contains("already") {
-                                    println!("[+] Connected!");
-                                    connected = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if !connected {
-            std::thread::sleep(Duration::from_millis(300));
-        }
-    }
-
-    // Cleanup
-    let _ = mdns.shutdown();
-
-    // Disconnect from mDNS service entry to avoid duplicate device entries
-    // ADB auto-connects via mDNS when it sees the _adb-tls-connect service,
-    // creating a duplicate entry alongside our explicit IP:port connection
-    if connected {
-        if let Some(ref guid) = device_guid {
-            let mdns_addr = format!("{}._adb-tls-connect._tcp", guid);
-            println!("[*] Disconnecting mDNS service entry: {}", mdns_addr);
-            adb_disconnect(&mdns_addr);
         }
     }
 
     if !connected {
-        // Prompt for manual port entry
-        if let Some(ref ip) = device_ip {
-            println!("[-] Could not auto-discover connect service.");
-            println!("    Your device IP is: {}", ip);
-            println!();
-            println!("    On your device, go to Wireless Debugging settings");
-            println!("    and look for the port number (e.g., 'IP address & Port').");
-            println!();
-            print!("    Enter the port number (or press Enter to skip): ");
-            use std::io::{self, Write};
-            let _ = io::stdout().flush();
-
-            let mut input = String::new();
-            if io::stdin().read_line(&mut input).is_ok() {
-                let input = input.trim();
-                if !input.is_empty() {
-                    if let Ok(port) = input.parse::<u16>() {
-                        let addr = format!("{}:{}", ip, port);
-                        println!("[*] Connecting to {}...", addr);
-
-                        if let Ok(result) = Command::new("adb").args(["connect", &addr]).output() {
-                            let out = String::from_utf8_lossy(&result.stdout);
-                            println!("    adb: {}", out.trim());
-                            if out.contains("connected") || out.contains("already") {
-                                println!("[+] Connected!");
-                                connected = true;
-
-                                // Disconnect from pairing endpoint
-                                if let Some(pport) = pairing_port {
-                                    let pairing_addr = format!("{}:{}", ip, pport);
-                                    println!("[*] Disconnecting pairing endpoint: {}", pairing_addr);
-                                    adb_disconnect(&pairing_addr);
-                                }
-                            }
-                        }
-                    } else {
-                        println!("    Invalid port number");
-                    }
-                }
-            }
-        }
-
-        if !connected {
-            println!("[-] Not connected. Run manually: adb connect <ip>:<port>");
-        }
+        println!("[-] ADB did not auto-connect. You may need to connect manually:");
+        println!("    adb connect <device-ip>:<port>");
+        println!();
+        println!("    Find the IP and port in your device's Wireless Debugging settings.");
     }
 
     show_devices();
