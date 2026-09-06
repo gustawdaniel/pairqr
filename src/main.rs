@@ -167,8 +167,8 @@ fn get_connected_device_serials() -> Vec<String> {
     serials
 }
 
-/// Fast scan for open TCP ports in 30000..=50000 on target IP
-async fn scan_open_ports(ip: &str) -> Vec<u16> {
+/// Fast scan for open TCP ports in 30000..=65535 on target IP
+async fn scan_open_ports(ip: &str, exclude_port: Option<u16>) -> Vec<u16> {
     use tokio::net::TcpStream;
     use tokio::time::timeout;
 
@@ -177,18 +177,20 @@ async fn scan_open_ports(ip: &str) -> Vec<u16> {
         Err(_) => return Vec::new(),
     };
 
-    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(500));
-    let mut tasks = Vec::new();
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1000));
+    let mut tasks = Vec::with_capacity(36000);
 
-    for port in 30000..=50000u16 {
+    for port in 30000..=65535u16 {
+        if Some(port) == exclude_port {
+            continue;
+        }
         let sem = sem.clone();
         tasks.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.ok()?;
             let socket_addr = std::net::SocketAddr::new(ip_addr, port);
-            if timeout(Duration::from_millis(150), TcpStream::connect(socket_addr)).await.is_ok() {
-                Some(port)
-            } else {
-                None
+            match timeout(Duration::from_millis(150), TcpStream::connect(socket_addr)).await {
+                Ok(Ok(_stream)) => Some(port),
+                _ => None,
             }
         }));
     }
@@ -199,6 +201,7 @@ async fn scan_open_ports(ip: &str) -> Vec<u16> {
             open_ports.push(port);
         }
     }
+    open_ports.sort_unstable();
     open_ports
 }
 
@@ -268,6 +271,7 @@ async fn main() {
     let mut paired = false;
     let mut device_guid: Option<String> = None;
     let mut device_ip: Option<String> = None;
+    let mut pairing_port: Option<u16> = None;
 
     // Wait for pairing
     while running.load(Ordering::SeqCst) && !paired {
@@ -287,6 +291,7 @@ async fn main() {
                             paired = true;
                             device_guid = guid;
                             device_ip = Some(ip);
+                            pairing_port = Some(port);
                         }
                     }
                 }
@@ -395,14 +400,21 @@ async fn main() {
             scanned_ports = true;
             if let Some(ref ip) = device_ip {
                 println!("[*] Scanning active wireless debugging ports on {}...", ip);
-                let open_ports = scan_open_ports(ip).await;
+                let open_ports = scan_open_ports(ip, pairing_port).await;
+                if open_ports.is_empty() {
+                    println!("[-] No open ports found in 30000..=65535 on {}", ip);
+                } else {
+                    println!("[*] Discovered {} open port(s): {:?}", open_ports.len(), open_ports);
+                }
                 for p in open_ports {
                     let addr = format!("{}:{}", ip, p);
                     println!("[*] Probing open port {}...", addr);
                     if let Ok(result) = Command::new("adb").args(["connect", &addr]).output() {
                         let out = String::from_utf8_lossy(&result.stdout);
                         println!("    adb: {}", out.trim());
-                        if out.contains("connected") || out.contains("already") {
+                        if (out.contains("connected to") || out.contains("already connected to"))
+                            && !out.contains("failed")
+                        {
                             println!("[+] Connected!");
                             connected = true;
                             break;
