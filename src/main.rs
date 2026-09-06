@@ -278,6 +278,12 @@ async fn main() {
         match pairing_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => match event {
                 ServiceEvent::ServiceResolved(info) => {
+                    // Only process pairing services matching our generated QR code service name
+                    // Ignore unrelated pairing broadcasts (e.g. adb-<guid> from 6-digit PIN pairing or other devices)
+                    if !info.get_fullname().contains(&name) {
+                        continue;
+                    }
+
                     println!("\n[+] Device found: {}", info.get_fullname());
 
                     if let Some(ip) = get_preferred_ip(info.get_addresses()) {
@@ -295,8 +301,10 @@ async fn main() {
                         }
                     }
                 }
-                ServiceEvent::ServiceRemoved(_type, name) => {
-                    println!("\n[!] Service removed: {}", name);
+                ServiceEvent::ServiceRemoved(_type, service_name) => {
+                    if service_name.contains(&name) {
+                        println!("\n[!] Service removed: {}", service_name);
+                    }
                 }
                 _ => {}
             },
