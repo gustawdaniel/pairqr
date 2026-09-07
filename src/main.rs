@@ -547,10 +547,20 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    async fn bind_low_port() -> (TcpListener, u16) {
+        for port in 18100..=28000 {
+            if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                return (l, port);
+            }
+        }
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        (l, port)
+    }
+
     #[tokio::test]
     async fn test_is_adb_port_stls_handshake() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let (listener, port) = bind_low_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
@@ -566,8 +576,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_adb_port_auth_handshake() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let (listener, port) = bind_low_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
@@ -583,8 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_adb_port_rejects_non_adb() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let (listener, port) = bind_low_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
@@ -600,8 +608,9 @@ mod tests {
     async fn test_is_adb_port_closed_port() {
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
         let port = {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            listener.local_addr().unwrap().port()
+            let (listener, p) = bind_low_port().await;
+            drop(listener);
+            p
         };
 
         assert!(!is_adb_port(ip, port, Duration::from_millis(300)).await);
@@ -609,14 +618,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_open_ports_finds_mock_adb() {
-        let listener = match TcpListener::bind("127.0.0.1:0").await {
-            Ok(l) => l,
-            Err(_) => return,
+        let (listener, port) = {
+            let mut bound = None;
+            for p in 30010..=31000 {
+                if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{}", p)).await {
+                    bound = Some((l, p));
+                    break;
+                }
+            }
+            match bound {
+                Some(pair) => pair,
+                None => return,
+            }
         };
-        let port = listener.local_addr().unwrap().port();
-        if port < 30000 {
-            return;
-        }
 
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
@@ -628,6 +642,49 @@ mod tests {
 
         let found = scan_open_ports("127.0.0.1", None).await;
         assert_eq!(found, vec![port]);
+    }
+
+    #[test]
+    fn test_random_string() {
+        let s1 = random_string(NAME_CHARS, 10);
+        let s2 = random_string(NAME_CHARS, 10);
+        assert_eq!(s1.len(), 10);
+        assert_eq!(s2.len(), 10);
+        assert_ne!(s1, s2);
+        assert!(s1.chars().all(|c| NAME_CHARS.contains(&(c as u8))));
+    }
+
+    #[test]
+    fn test_get_preferred_ip_prefers_ipv4() {
+        let mut addrs = std::collections::HashSet::new();
+        let ipv4: IpAddr = "192.168.1.50".parse().unwrap();
+        let ipv6: IpAddr = "fe80::1".parse().unwrap();
+        addrs.insert(ipv6);
+        addrs.insert(ipv4);
+
+        let preferred = get_preferred_ip(&addrs);
+        assert_eq!(preferred, Some("192.168.1.50".to_string()));
+    }
+
+    #[test]
+    fn test_get_preferred_ip_formats_ipv6() {
+        let mut addrs = std::collections::HashSet::new();
+        let ipv6: IpAddr = "2001:db8::1".parse().unwrap();
+        addrs.insert(ipv6);
+
+        let preferred = get_preferred_ip(&addrs);
+        assert_eq!(preferred, Some("[2001:db8::1]".to_string()));
+    }
+
+    #[test]
+    fn test_get_preferred_ip_empty() {
+        let addrs = std::collections::HashSet::new();
+        assert_eq!(get_preferred_ip(&addrs), None);
+    }
+
+    #[test]
+    fn test_display_qr_code_no_panic() {
+        display_qr_code("WIFI:T:ADB;S:studio-test;P:password;;");
     }
 }
 
