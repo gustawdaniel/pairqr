@@ -547,8 +547,11 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    async fn bind_low_port() -> (TcpListener, u16) {
-        for port in 18100..=28000 {
+    static TEST_PORT_COUNTER: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+    async fn bind_isolated_port() -> (TcpListener, u16) {
+        let base = 18100 + TEST_PORT_COUNTER.fetch_add(20, Ordering::SeqCst);
+        for port in base..base + 20 {
             if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{}", port)).await {
                 return (l, port);
             }
@@ -560,11 +563,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_adb_port_stls_handshake() {
-        let (listener, port) = bind_low_port().await;
+        let (listener, port) = bind_isolated_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((mut socket, _)) = listener.accept().await {
                 let mut buf = [0u8; 31];
                 let _ = socket.read(&mut buf).await;
                 let _ = socket.write_all(b"STLS\x01\x00\x00\x00").await;
@@ -576,11 +579,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_adb_port_auth_handshake() {
-        let (listener, port) = bind_low_port().await;
+        let (listener, port) = bind_isolated_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((mut socket, _)) = listener.accept().await {
                 let mut buf = [0u8; 31];
                 let _ = socket.read(&mut buf).await;
                 let _ = socket.write_all(b"AUTH\x01\x00\x00\x00").await;
@@ -592,11 +595,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_adb_port_rejects_non_adb() {
-        let (listener, port) = bind_low_port().await;
+        let (listener, port) = bind_isolated_port().await;
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
         tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((mut socket, _)) = listener.accept().await {
                 let _ = socket.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
             }
         });
@@ -608,7 +611,7 @@ mod tests {
     async fn test_is_adb_port_closed_port() {
         let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
         let port = {
-            let (listener, p) = bind_low_port().await;
+            let (listener, p) = bind_isolated_port().await;
             drop(listener);
             p
         };
