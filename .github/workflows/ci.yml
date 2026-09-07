@@ -61,7 +61,9 @@ jobs:
           path: coverage-html
 
       - name: Upload to Codecov
-        if: "${{ secrets.CODECOV_TOKEN != '' }}"
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        if: env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
